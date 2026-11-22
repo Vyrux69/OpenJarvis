@@ -126,18 +126,34 @@ export function HandsFreeVoice() {
       || document.querySelector('textarea')) as HTMLTextAreaElement | null;
     if (!ta) { stop('No encontré el cuadro de mensaje.'); return; }
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-    setter?.call(ta, text);
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    later(() => {
+    // React updates asynchronously, and slow phones can take well over 150 ms to
+    // enable the send button. Re-apply the text and poll for an enabled button.
+    let tries = 0;
+    const attempt = () => {
+      if (!activeRef.current) return;
+      tries += 1;
+      if (ta.value !== text) {
+        setter?.call(ta, text);
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
       // The send button is the last button next to the textarea (after the mic button).
       const row = ta.parentElement;
       const buttons = row ? Array.from(row.querySelectorAll('button')) : [];
       const btn = (buttons[buttons.length - 1] as HTMLButtonElement | undefined) ?? null;
-      if (!btn) { stop('No encontré el botón de enviar. Modo voz detenido.'); return; }
-      if (btn.disabled) { stop('El botón de enviar estaba desactivado (¿mensaje vacío, modelo cargando o respuesta en curso?). Modo voz detenido.'); return; }
-      waitForReply();
-      btn.click();
-    }, 150);
+      if (btn && !btn.disabled && ta.value === text) {
+        waitForReply();
+        btn.click();
+        return;
+      }
+      if (tries >= 30) {
+        stop(btn
+          ? 'El botón de enviar siguió desactivado (¿modelo cargando o respuesta en curso?). Modo voz detenido.'
+          : 'No encontré el botón de enviar. Modo voz detenido.');
+        return;
+      }
+      later(attempt, 100);
+    };
+    later(attempt, 100);
   }, [stop, waitForReply]);
 
   const listen = useCallback(() => {
