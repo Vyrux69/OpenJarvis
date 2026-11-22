@@ -1182,7 +1182,7 @@ async def list_models(request: Request) -> ModelListResponse:
         m
         for m in all_ids
         if not is_cloud_model(m)
-        or _engine_key_for_model(engine, m) in ("litellm", "nim")
+        or _engine_key_for_model(engine, m) in ("litellm", "nim", "cloud")
         or _local_engine_advertises(engine, m, known_models=known_models)
     ]
     if not model_ids:
