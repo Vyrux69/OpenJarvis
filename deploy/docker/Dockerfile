@@ -86,4 +86,4 @@ EXPOSE 8000
 # remain subcommands (for example, `docker run IMAGE serve ...`). Platforms
 # such as Render replace CMD while preserving this entrypoint.
 ENTRYPOINT ["jarvis"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "10000", "--engine", "cloud", "--model", "gemini-3.8-flash"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "10000", "--engine", "cloud", "--model", "gemini-3.5-flash-lite"]
