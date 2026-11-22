@@ -121,14 +121,20 @@ export function HandsFreeVoice() {
   }, [speakThenListen, stop]);
 
   const submitText = useCallback((text: string) => {
-    const ta = document.querySelector('textarea[placeholder^="Message OpenJarvis"]') as HTMLTextAreaElement | null;
+    // Do not rely on English labels: browser page translation rewrites them.
+    const ta = (document.querySelector('textarea[placeholder^="Message OpenJarvis"]')
+      || document.querySelector('textarea')) as HTMLTextAreaElement | null;
     if (!ta) { stop('No encontré el cuadro de mensaje.'); return; }
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
     setter?.call(ta, text);
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     later(() => {
-      const btn = document.querySelector('button[title="Send message"]') as HTMLButtonElement | null;
-      if (!btn || btn.disabled) { stop('No pude enviar (¿falta elegir modelo?). Modo voz detenido.'); return; }
+      // The send button is the last button next to the textarea (after the mic button).
+      const row = ta.parentElement;
+      const buttons = row ? Array.from(row.querySelectorAll('button')) : [];
+      const btn = (buttons[buttons.length - 1] as HTMLButtonElement | undefined) ?? null;
+      if (!btn) { stop('No encontré el botón de enviar. Modo voz detenido.'); return; }
+      if (btn.disabled) { stop('El botón de enviar estaba desactivado (¿mensaje vacío, modelo cargando o respuesta en curso?). Modo voz detenido.'); return; }
       waitForReply();
       btn.click();
     }, 150);
