@@ -13,6 +13,20 @@ from typing import Any, List, Optional
 from openjarvis.core.events import Event, EventBus, EventType
 from openjarvis.core.types import StepType, Trace, TraceStep
 
+
+def _json_default(o):
+    """Make bytes (e.g. Gemini thought signatures) storable in traces."""
+    if isinstance(o, (bytes, bytearray)):
+        import base64
+
+        return base64.b64encode(bytes(o)).decode("ascii")
+    return str(o)
+
+
+def _json_dumps(obj):
+    return json.dumps(obj, default=_json_default)
+
+
 _CREATE_TRACES = """\
 CREATE TABLE IF NOT EXISTS traces (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,8 +207,8 @@ class TraceStore:
                 trace.ended_at,
                 trace.total_tokens,
                 trace.total_latency_seconds,
-                json.dumps(trace.metadata),
-                json.dumps(trace.messages),
+                _json_dumps(trace.metadata),
+                _json_dumps(trace.messages),
             ),
         )
         for idx, step in enumerate(trace.steps):
@@ -208,9 +222,9 @@ class TraceStore:
                     else step.step_type,
                     step.timestamp,
                     step.duration_seconds,
-                    json.dumps(step.input),
-                    json.dumps(step.output),
-                    json.dumps(step.metadata),
+                    _json_dumps(step.input),
+                    _json_dumps(step.output),
+                    _json_dumps(step.metadata),
                 ),
             )
         self._conn.commit()
