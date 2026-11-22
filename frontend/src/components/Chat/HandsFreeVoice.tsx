@@ -17,6 +17,8 @@ type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 const MAX_TURNS = 20;
 const MAX_SILENT = 2;
 const LANG = 'es-MX';
+// Visible build id, so it is clear which version of the page is loaded.
+const VOICE_BUILD = 'voz-v4';
 
 function getRecognitionCtor(): any {
   const w = window as any;
@@ -262,7 +264,7 @@ export function HandsFreeVoice() {
       )}
       {!active && (
         <div className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
-          Usa el micrófono del navegador (en Chrome el audio lo procesa Google).
+          Usa el micrófono del navegador (en Chrome el audio lo procesa Google). Versión: {VOICE_BUILD}
         </div>
       )}
     </div>
