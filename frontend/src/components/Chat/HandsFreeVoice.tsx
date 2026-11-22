@@ -9,6 +9,9 @@ import { stripThinkTags, toSpeakableText } from '../../lib/message-text';
  * -> listen again. It never listens while speaking, starts only when the user
  * taps Start, and stops on Stop, on errors, on silence, when the tab is hidden,
  * or after MAX_TURNS turns.
+ * The server reports failures as ordinary assistant text ("Sorry, an error
+ * occurred: ..."). Those replies are not read aloud; the cycle pauses with a
+ * short spoken notice instead, and the user restarts manually.
  * Note: in Chrome the recognition audio is sent by the browser to Google.
  */
 
@@ -18,7 +21,20 @@ const MAX_TURNS = 20;
 const MAX_SILENT = 2;
 const LANG = 'es-MX';
 // Visible build id, so it is clear which version of the page is loaded.
-const VOICE_BUILD = 'voz-v4';
+const VOICE_BUILD = 'voz-v5';
+
+// The backend turns request failures into normal assistant messages with one
+// of these prefixes (stream_bridge.py / routes.py). Detection uses the raw
+// store text, so browser page translation does not affect it.
+type ErrorReplyKind = 'saturation' | 'too-long' | 'service';
+
+function classifyErrorReply(text: string): ErrorReplyKind | null {
+  if (text.startsWith('The input is too long')) return 'too-long';
+  if (text.startsWith('Sorry, an error occurred:') || text.startsWith('The model returned an error:')) {
+    return /\b503\b|UNAVAILABLE|high demand/i.test(text) ? 'saturation' : 'service';
+  }
+  return null;
+}
 
 function getRecognitionCtor(): any {
   const w = window as any;
@@ -74,6 +90,39 @@ export function HandsFreeVoice() {
     setNote(message);
   }, []);
 
+  // Stop the cycle and speak a short notice. Capture stops BEFORE the notice,
+  // the notice's onend never re-arms listening, and Detener still cancels it
+  // because the phase stays 'speaking' (non-idle) until it finishes.
+  const speakNoticeAndStop = useCallback((spoken: string, noteText: string) => {
+    activeRef.current = false;
+    clearTimers();
+    unsubRef.current?.();
+    unsubRef.current = null;
+    try { recRef.current?.abort?.(); } catch { /* ignore */ }
+    recRef.current = null;
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    setNote(noteText);
+    try {
+      const u = new SpeechSynthesisUtterance(spoken);
+      u.lang = LANG;
+      const v = pickVoice();
+      if (v) u.voice = v;
+      setP('speaking');
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        if (!activeRef.current) setP('idle');
+      };
+      u.onend = finish;
+      u.onerror = finish;
+      later(finish, Math.min(30000, 4000 + spoken.length * 90));
+      window.speechSynthesis.speak(u);
+    } catch {
+      setP('idle');
+    }
+  }, []);
+
   const speakThenListen = useCallback((text: string) => {
     if (!activeRef.current) return;
     const spoken = toSpeakableText(text);
@@ -114,13 +163,35 @@ export function HandsFreeVoice() {
       if (!last || last.role !== 'assistant') { stop('No llegó respuesta. Modo voz detenido.'); return; }
       const text = stripThinkTags(last.content);
       if (!text) { stop('Respuesta vacía. Modo voz detenido.'); return; }
+      const errKind = classifyErrorReply(text);
+      if (errKind === 'saturation') {
+        speakNoticeAndStop(
+          'El servicio está saturado. Pausé el modo voz. Toca iniciar modo voz para reintentar en unos minutos.',
+          'Servicio saturado (503). Modo voz en pausa.',
+        );
+        return;
+      }
+      if (errKind === 'too-long') {
+        speakNoticeAndStop(
+          'El mensaje es demasiado largo para el modelo. Modo voz detenido.',
+          'Entrada demasiado larga. Modo voz detenido.',
+        );
+        return;
+      }
+      if (errKind === 'service') {
+        speakNoticeAndStop(
+          'El servicio tuvo un error. Pausé el modo voz. Toca iniciar modo voz para reintentar.',
+          'Error del servicio. Modo voz en pausa.',
+        );
+        return;
+      }
       speakThenListen(text);
     });
     unsubRef.current = unsub;
     later(() => {
       if (activeRef.current && !started) stop('No se pudo enviar el mensaje. Modo voz detenido.');
     }, 8000);
-  }, [speakThenListen, stop]);
+  }, [speakNoticeAndStop, speakThenListen, stop]);
 
   const submitText = useCallback((text: string) => {
     // Do not rely on English labels: browser page translation rewrites them.
