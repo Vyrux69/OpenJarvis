@@ -1,0 +1,7 @@
+# Propuesta (NO desplegada): chat de Jarvis con busqueda web minima read-only.
+# Solo web_search: sin ejecucion de codigo, sin archivos, sin otras herramientas.
+[server]
+agent = "native_react"
+
+[tools]
+enabled = "web_search"
