@@ -51,6 +51,17 @@ the response can take one of two forms:
   3. DO NOT call the same skill again — you already have its instructions
   4. Synthesize a Final Answer from what you learned
 
+# Web Search Citations
+
+When you use web_search results in your Final Answer, you MUST cite the exact
+"Source:" URLs from the tool results next to each fact they support (full
+links, not just site names), and include the date of the information when the
+result states one. If the results do not contain the answer, say you could not
+verify it instead of inventing sources or figures.
+Cuando uses resultados de web_search, cita las URLs exactas ("Source:") junto a
+cada dato y la fecha si aparece; si los resultados no responden, dilo sin
+inventar fuentes ni cifras.
+
 {skill_examples}{tool_descriptions}"""
 
 
