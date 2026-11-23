@@ -981,7 +981,7 @@ class CloudEngine(InferenceEngine):
         tool_calls: list[Dict[str, Any]] = []
         candidates = getattr(resp, "candidates", None)
         if candidates:
-            parts = getattr(candidates[0].content, "parts", [])
+            parts = getattr(candidates[0].content, "parts", None) or []
             for part in parts:
                 if hasattr(part, "function_call") and part.function_call:
                     fc = part.function_call
@@ -1009,9 +1009,15 @@ class CloudEngine(InferenceEngine):
             except (ValueError, AttributeError):
                 content = ""
 
-        um = resp.usage_metadata
-        prompt_tokens = getattr(um, "prompt_token_count", 0) if um else 0
-        completion_tokens = getattr(um, "candidates_token_count", 0) if um else 0
+        if not content and not tool_calls:
+            content = (
+                "No recibí una respuesta utilizable de Google en este intento. "
+                "Podemos seguir en esta misma conversación; intenta de nuevo."
+            )
+
+        um = getattr(resp, "usage_metadata", None)
+        prompt_tokens = (getattr(um, "prompt_token_count", 0) or 0) if um else 0
+        completion_tokens = (getattr(um, "candidates_token_count", 0) or 0) if um else 0
 
         result: Dict[str, Any] = {
             "content": content,
