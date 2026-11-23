@@ -657,8 +657,21 @@ class WebSearchTool(BaseTool):
                 success=False,
             )
 
-        # If the query contains a URL, fetch it directly instead of searching
-        url = self._extract_url(query) if not self._is_url(query) else query.strip()
+        # If the query contains a URL, fetch it directly instead of searching.
+        # Deployments that want search-only behavior (no arbitrary outbound
+        # fetches) can disable this branch entirely.
+        if os.environ.get("OPENJARVIS_WEB_SEARCH_DISABLE_FETCH", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            url = None
+        else:
+            url = (
+                self._extract_url(query)
+                if not self._is_url(query)
+                else query.strip()
+            )
         if url:
             if self._resolve_engine() == "firecrawl":
                 ssrf_error = check_ssrf(self._normalize_url(url))
