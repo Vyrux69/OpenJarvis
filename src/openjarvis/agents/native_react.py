@@ -7,7 +7,9 @@ implementation, not an integration with an external project.
 from __future__ import annotations
 
 import json
+import os
 import re
+import unicodedata
 from typing import Any, List, Optional
 
 from openjarvis.agents._stubs import AgentContext, AgentResult, ToolUsingAgent
@@ -139,6 +141,40 @@ def _parse_json_response(text: str) -> dict[str, str]:
         }
 
 
+def _weather_now_request(text: str, context: Optional[AgentContext]) -> bool:
+    """Conservative guard for weather requests on snippet-only deployments."""
+    def normalized(value: str) -> str:
+        return ''.join(
+            c for c in unicodedata.normalize('NFKD', value.lower())
+            if not unicodedata.combining(c)
+        )
+
+    current = normalized(text)
+    weather = r'\b(clima|tiempo|pronostico|lluvia|llover\w*|llov\w*|frio|calor|temperatura\w*|weather|forecast|rain\w*|cold)\b'
+    live = r'\b(hoy|ahora|actual|manana|noche|tarde|dia|semana|va a|va estar|hara|habra|traera|today|now|tomorrow|will)\b'
+    educational = r'\b(que es|que significa|por que|como se forma|definicion|what is|why does)\b'
+    if re.search(weather, current):
+        if re.search(educational, current) and not re.search(live, current):
+            return False
+        if re.search(live, current) or re.search(r'\b(clima|pronostico|weather|forecast)\b', current):
+            return True
+    if context is None or len(current) > 180:
+        return False
+    prior = [m.text for m in context.conversation.messages if m.role == Role.USER]
+    if not prior:
+        return False
+    previous = normalized(prior[-1])
+    followup = r'\b(entonces|verdad|y |abrigo|chamarra|paraguas|bufanda|frio|lluvia|calor|temperatura|seguro|so |umbrella|jacket)\b'
+    recent_guard = any(
+        m.role == Role.ASSISTANT and 'No puedo verificar el clima actual' in m.text
+        for m in context.conversation.messages[-2:]
+    )
+    return bool(
+        (re.search(weather, previous) or recent_guard)
+        and re.search(followup, current)
+    )
+
+
 @AgentRegistry.register("native_react")
 class NativeReActAgent(ToolUsingAgent):
     """ReAct agent: Thought -> Action -> Observation loop."""
@@ -240,6 +276,55 @@ class NativeReActAgent(ToolUsingAgent):
         **kwargs: Any,
     ) -> AgentResult:
         self._emit_turn_start(input)
+
+        # Search-only results are indexed snippets, not verified live weather.
+        # Do not let model wording turn an old forecast into current conditions.
+        if (
+            os.environ.get("OPENJARVIS_WEB_SEARCH_DISABLE_FETCH", "").lower()
+            in ("1", "true", "yes")
+            and _weather_now_request(input, context)
+        ):
+            self._build_messages(input, context)
+            query = input
+            if context is not None and not re.search(
+                r'\b(clima|weather|pron[oó]stico)\b', input, re.IGNORECASE
+            ):
+                for previous in reversed(context.conversation.messages):
+                    if previous.role == Role.USER and re.search(
+                        r'\b(clima|weather|pron[oó]stico)\b', previous.text, re.IGNORECASE
+                    ):
+                        query = previous.text
+                        break
+            search_results = []
+            links = []
+            if any(tool.spec.name == 'web_search' for tool in self._tools):
+                search_result = self._executor.execute(ToolCall(
+                    id='weather_links_only',
+                    name='web_search',
+                    arguments=json.dumps({'query': query, 'max_results': 3}),
+                ))
+                search_results.append(search_result)
+                if search_result.success:
+                    for url in re.findall(r'^Source: (https://[^\s<>]+)$', search_result.content, re.MULTILINE):
+                        if url not in links:
+                            links.append(url)
+            text = (
+                "No puedo verificar el clima actual con esta búsqueda: "
+                "recibo extractos que pueden ser de otro día. "
+                "No tomes las temperaturas ni el pronóstico anterior como "
+                "vigentes."
+            )
+            if links:
+                text += '\n\nEnlaces encontrados, sin confirmar su actualización:\n'
+                text += '\n'.join(links[:3])
+            else:
+                text += ' No encontré enlaces utilizables en este intento.'
+            self._emit_turn_end(turns=0)
+            return AgentResult(
+                content=text,
+                tool_results=search_results,
+                metadata={"weather_freshness_unverified": True},
+            )
 
         # Build system prompt with rich tool descriptions
         tool_desc = build_tool_descriptions(self._tools)
